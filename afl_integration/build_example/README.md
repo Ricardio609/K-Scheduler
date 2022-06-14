@@ -10,6 +10,7 @@
     export CC=wllvm
     export CXX=wllvm++
     # Common compiler flags used in Google FuzzBench. Note that we add "-fsanitize-coverage=no-prune" to ensure a complete CFG intrumentation.
+    export CFLAGS="-fsanitize-coverage=trace-pc-guard,no-prune -O2 -fno-omit-frame-pointer -gline-tables-only -fsanitize=address,fuzzer-no-link -fsanitize-address-use-after-scope"
     export CXXFLAGS="-fsanitize-coverage=trace-pc-guard,no-prune -O2 -fno-omit-frame-pointer -gline-tables-only -fsanitize=address,fuzzer-no-link -fsanitize-address-use-after-scope"
     # build afl runtime library
     $CC -O2 -c -w [path to K-Scheduler repo]/K-Scheduler/afl_integration/afl-2.52b_kscheduler/llvm_mode/afl-llvm-rt.o.c -o afl-llvm-rt.o
@@ -21,14 +22,17 @@
     ```
 4. Build harfbuzz following Google FuzzBench settings
     ```sh
-    rm -rf BUILD
-    cp -r SRC BUILD 
+    # download harfbuzz source code
+    git clone https://github.com/behdad/harfbuzz.git
+    cd harfbuzz && git checkout f73a87d9a8c76a181794b74b527ea268048f78e3
+    cd .. && cp -r harfbuzz BUILD
     # configure and build harfbuzz
+    (cd ./src/hb-ucdn && CCLD="$CXX $CXXFLAGS" make)
     cd BUILD && ./autogen.sh && CCLD="$CXX $CXXFLAGS" ./configure --enable-static --disable-shared && make -j -C src fuzzing && cd ..
     # build harfbuzz fuzzer wrapper
     $CXX $CXXFLAGS -c -std=c++11 -I BUILD/src/ BUILD/test/fuzzing/hb-fuzzer.cc -o BUILD/test/fuzzing/hb-fuzzer.o 
     # link harfbuzz fuzzer wrapper with afl driver
-    $CXX $CXXFLAGS -std=c++11 -I BUILD/src/ BUILD/test/fuzzing/hb-fuzzer.o BUILD/src/.libs/libharfbuzz-fuzzing.a afl_llvm_rt_driver.a -lglib-2.0 -o harfbuzz_afl_asan
+    $CXX $CXXFLAGS -std=c++11 -I BUILD/src/ BUILD/test/fuzzing/hb-fuzzer.o BUILD/src/.libs/libharfbuzz-fuzzing.a afl_llvm_rt_driver.a -o harfbuzz_afl_asan
     ```
 5. Construct inter-procedural CFG for harfbuzz
     ```sh
@@ -62,3 +66,5 @@
     # run libfuzzer_kscheduler
     ./afl-fuzz_kscheduler -i seeds/ -o afl_out_cent -d -m none ./harfbuzz_afl_asan @@
     ```
+### Run K-Scheduler-based afl on a non-wrapper based program like Binutils.
+Please check tutorial at https://github.com/Dongdongshe/K-Scheduler/blob/main/afl_integration/build_example/README(non_wrapper%20based%20program).md

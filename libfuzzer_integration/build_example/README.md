@@ -9,18 +9,23 @@
     export CC=wllvm
     export CXX=wllvm++
     # Common compiler flags used in Google FuzzBench. Note that we add "-fsanitize-coverage=no-prune" to ensure a complete CFG intrumentation.
+    export CFLAGS="-O2 -fno-omit-frame-pointer -gline-tables-only -fsanitize=address,fuzzer-no-link -fsanitize-coverage=no-prune -fsanitize-address-use-after-scope"
     export CXXFLAGS="-O2 -fno-omit-frame-pointer -gline-tables-only -fsanitize=address,fuzzer-no-link -fsanitize-coverage=no-prune -fsanitize-address-use-after-scope"
     ```
 3. Build harfbuzz with K-Scheduler-based LibFuzzer following Google FuzzBench settings
     ```sh
-    rm -rf BUILD
-    cp -r SRC BUILD 
+    # download harfbuzz source code 
+    git clone https://github.com/behdad/harfbuzz.git
+    cd harfbuzz && git checkout f73a87d9a8c76a181794b74b527ea268048f78e3
+    cd .. && cp -r harfbuzz BUILD
     # configure and build harfbuzz
-    cd BUILD && ./autogen.sh && CCLD="$CXX $CXXFLAGS" ./configure --enable-static --disable-shared && make -j -C src fuzzing && cd ..
+    cd BUILD && ./autogen.sh
+    (cd ./src/hb-ucdn && CCLD="$CXX $CXXFLAGS" make)
+    CCLD="$CXX $CXXFLAGS" ./configure --enable-static --disable-shared && make -j -C src fuzzing && cd ..
     # build harfbuzz fuzzer wrapper
     $CXX $CXXFLAGS -c -std=c++11 -I BUILD/src/ BUILD/test/fuzzing/hb-fuzzer.cc -o BUILD/test/fuzzing/hb-fuzzer.o 
     # link harfbuzz fuzzer wrapper with LibFuzzer
-    $CXX $CXXFLAGS -std=c++11 -I BUILD/src/ BUILD/test/fuzzing/hb-fuzzer.o BUILD/src/.libs/libharfbuzz-fuzzing.a -fsanitize=fuzzer -lglib-2.0 -o harfbuzz-1.3.2-fsanitize_fuzzer_kscheduler
+    $CXX $CXXFLAGS -std=c++11 -I BUILD/src/ BUILD/test/fuzzing/hb-fuzzer.o BUILD/src/.libs/libharfbuzz-fuzzing.a -fsanitize=fuzzer -o harfbuzz-1.3.2-fsanitize_fuzzer_kscheduler
     ```
 4. Construct inter-procedural CFG for harfbuzz
     ```sh
