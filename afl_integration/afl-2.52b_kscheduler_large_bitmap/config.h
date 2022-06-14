@@ -210,6 +210,8 @@
 
 #define OUTPUT_GRACE        25
 
+#define MUTATOR_BANDIT_LEN 3
+
 /* Uncomment to use simple file names (id_NNNNNN): */
 
 // #define SIMPLE_FILES
