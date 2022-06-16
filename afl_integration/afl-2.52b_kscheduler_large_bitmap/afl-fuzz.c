@@ -7186,11 +7186,11 @@ havoc_stage:
           break;
         }
       }
-      else
+      else if (mutator_arm == 1)
       {
         /* Chunk mutator */
 
-        switch (11 + UR(4 + ((extras_cnt + a_extras_cnt) ? 2 : 0)))
+        switch (11 + UR(4))
         {
 
         case 11 ... 12:
@@ -7298,6 +7298,12 @@ havoc_stage:
 
           break;
         }
+        }
+      }
+      else if ()
+      {
+        switch (15 + UR((extras_cnt + a_extras_cnt) ? 2 : 0))
+        {
           /* Values 15 and 16 can be selected only if there are any extras
            present in the dictionaries. */
 
@@ -7398,185 +7404,186 @@ havoc_stage:
         }
       }
     }
+  }
 
-    if (common_fuzz_stuff(argv, out_buf, temp_len))
-      goto abandon_entry;
+  if (common_fuzz_stuff(argv, out_buf, temp_len))
+    goto abandon_entry;
 
-    /* out_buf might have been mangled a bit, so let's restore it to its
-       original size and shape. */
+  /* out_buf might have been mangled a bit, so let's restore it to its
+     original size and shape. */
 
-    if (temp_len < len)
-      out_buf = ck_realloc(out_buf, len);
-    temp_len = len;
-    memcpy(out_buf, in_buf, len);
+  if (temp_len < len)
+    out_buf = ck_realloc(out_buf, len);
+  temp_len = len;
+  memcpy(out_buf, in_buf, len);
 
-    /* If we're finding new stuff, let's run for a bit longer, limits
-       permitting. */
+  /* If we're finding new stuff, let's run for a bit longer, limits
+     permitting. */
 
-    u32 reward = 0;
+  u32 reward = 0;
 
-    if (queued_paths != havoc_queued)
+  if (queued_paths != havoc_queued)
+  {
+
+    reward = 1;
+
+    if ((perf_score <= HAVOC_MAX_MULT * 100) && (init_perf_score >= 100))
     {
-
-      reward = 1;
-
-      if ((perf_score <= HAVOC_MAX_MULT * 100) && (init_perf_score >= 100))
-      {
-        stage_max *= 2;
-        perf_score *= 2;
-      }
-
-      havoc_queued = queued_paths;
+      stage_max *= 2;
+      perf_score *= 2;
     }
-    update_arms(stack_num, reward, stack_bandit);
 
-    update_arms(mutator_arm, reward, mutator_bandit[stack_num]);
+    havoc_queued = queued_paths;
   }
+  update_arms(stack_num, reward, stack_bandit);
 
-  // here
-  new_hit_cnt = queued_paths + unique_crashes;
+  update_arms(mutator_arm, reward, mutator_bandit[stack_num]);
+}
 
-  if (!splice_cycle)
-  {
-    stage_finds[STAGE_HAVOC] += new_hit_cnt - orig_hit_cnt;
-    stage_cycles[STAGE_HAVOC] += stage_max;
-  }
-  else
-  {
-    stage_finds[STAGE_SPLICE] += new_hit_cnt - orig_hit_cnt;
-    stage_cycles[STAGE_SPLICE] += stage_max;
-  }
+// here
+new_hit_cnt = queued_paths + unique_crashes;
+
+if (!splice_cycle)
+{
+  stage_finds[STAGE_HAVOC] += new_hit_cnt - orig_hit_cnt;
+  stage_cycles[STAGE_HAVOC] += stage_max;
+}
+else
+{
+  stage_finds[STAGE_SPLICE] += new_hit_cnt - orig_hit_cnt;
+  stage_cycles[STAGE_SPLICE] += stage_max;
+}
 
 #ifndef IGNORE_FINDS
 
-  /************
-   * SPLICING *
-   ************/
+/************
+ * SPLICING *
+ ************/
 
-  /* This is a last-resort strategy triggered by a full round with no findings.
-     It takes the current input file, randomly selects another input, and
-     splices them together at some offset, then relies on the havoc
-     code to mutate that blob. */
+/* This is a last-resort strategy triggered by a full round with no findings.
+   It takes the current input file, randomly selects another input, and
+   splices them together at some offset, then relies on the havoc
+   code to mutate that blob. */
 
-retry_splicing:
+retry_splicing :
 
-  if (use_splicing && splice_cycle++ < SPLICE_CYCLES &&
-      queued_paths > 1 && queue_cur->len > 1 && init_perf_score >= 25)
+    if (use_splicing && splice_cycle++ < SPLICE_CYCLES &&
+        queued_paths > 1 && queue_cur->len > 1 && init_perf_score >= 25)
+{
+
+  struct queue_entry *target;
+  u32 tid, split_at;
+  u8 *new_buf;
+  s32 f_diff, l_diff;
+
+  /* First of all, if we've modified in_buf for havoc, let's clean that
+     up... */
+
+  if (in_buf != orig_in)
   {
-
-    struct queue_entry *target;
-    u32 tid, split_at;
-    u8 *new_buf;
-    s32 f_diff, l_diff;
-
-    /* First of all, if we've modified in_buf for havoc, let's clean that
-       up... */
-
-    if (in_buf != orig_in)
-    {
-      ck_free(in_buf);
-      in_buf = orig_in;
-      len = queue_cur->len;
-    }
-
-    /* Pick a random queue entry and seek to it. Don't splice with yourself. */
-
-    do
-    {
-      tid = UR(queued_paths);
-    } while (tid == current_entry);
-
-    splicing_with = tid;
-    target = queue;
-
-    while (tid >= 100)
-    {
-      target = target->next_100;
-      tid -= 100;
-    }
-    while (tid--)
-      target = target->next;
-
-    /* Make sure that the target has a reasonable length. */
-
-    while (target && (target->len < 2 || target == queue_cur))
-    {
-      target = target->next;
-      splicing_with++;
-    }
-
-    if (!target)
-      goto retry_splicing;
-
-    /* Read the testcase into a new buffer. */
-
-    fd = open(target->fname, O_RDONLY);
-
-    if (fd < 0)
-      PFATAL("Unable to open '%s'", target->fname);
-
-    new_buf = ck_alloc_nozero(target->len);
-
-    ck_read(fd, new_buf, target->len, target->fname);
-
-    close(fd);
-
-    /* Find a suitable splicing location, somewhere between the first and
-       the last differing byte. Bail out if the difference is just a single
-       byte or so. */
-
-    locate_diffs(in_buf, new_buf, MIN(len, target->len), &f_diff, &l_diff);
-
-    if (f_diff < 0 || l_diff < 2 || f_diff == l_diff)
-    {
-      ck_free(new_buf);
-      goto retry_splicing;
-    }
-
-    /* Split somewhere between the first and last differing byte. */
-
-    split_at = f_diff + UR(l_diff - f_diff);
-
-    /* Do the thing. */
-
-    len = target->len;
-    memcpy(new_buf, in_buf, split_at);
-    in_buf = new_buf;
-
-    ck_free(out_buf);
-    out_buf = ck_alloc_nozero(len);
-    memcpy(out_buf, in_buf, len);
-
-    goto havoc_stage;
+    ck_free(in_buf);
+    in_buf = orig_in;
+    len = queue_cur->len;
   }
+
+  /* Pick a random queue entry and seek to it. Don't splice with yourself. */
+
+  do
+  {
+    tid = UR(queued_paths);
+  } while (tid == current_entry);
+
+  splicing_with = tid;
+  target = queue;
+
+  while (tid >= 100)
+  {
+    target = target->next_100;
+    tid -= 100;
+  }
+  while (tid--)
+    target = target->next;
+
+  /* Make sure that the target has a reasonable length. */
+
+  while (target && (target->len < 2 || target == queue_cur))
+  {
+    target = target->next;
+    splicing_with++;
+  }
+
+  if (!target)
+    goto retry_splicing;
+
+  /* Read the testcase into a new buffer. */
+
+  fd = open(target->fname, O_RDONLY);
+
+  if (fd < 0)
+    PFATAL("Unable to open '%s'", target->fname);
+
+  new_buf = ck_alloc_nozero(target->len);
+
+  ck_read(fd, new_buf, target->len, target->fname);
+
+  close(fd);
+
+  /* Find a suitable splicing location, somewhere between the first and
+     the last differing byte. Bail out if the difference is just a single
+     byte or so. */
+
+  locate_diffs(in_buf, new_buf, MIN(len, target->len), &f_diff, &l_diff);
+
+  if (f_diff < 0 || l_diff < 2 || f_diff == l_diff)
+  {
+    ck_free(new_buf);
+    goto retry_splicing;
+  }
+
+  /* Split somewhere between the first and last differing byte. */
+
+  split_at = f_diff + UR(l_diff - f_diff);
+
+  /* Do the thing. */
+
+  len = target->len;
+  memcpy(new_buf, in_buf, split_at);
+  in_buf = new_buf;
+
+  ck_free(out_buf);
+  out_buf = ck_alloc_nozero(len);
+  memcpy(out_buf, in_buf, len);
+
+  goto havoc_stage;
+}
 
 #endif /* !IGNORE_FINDS */
 
-  ret_val = 0;
+ret_val = 0;
 
-abandon_entry:
+abandon_entry :
 
-  splicing_with = -1;
+    splicing_with = -1;
 
-  /* Update pending_not_fuzzed count if we made it through the calibration
-     cycle and have not seen this entry before. */
+/* Update pending_not_fuzzed count if we made it through the calibration
+   cycle and have not seen this entry before. */
 
-  if (!stop_soon && !queue_cur->cal_failed && !queue_cur->was_fuzzed)
-  {
-    queue_cur->was_fuzzed = 1;
-    pending_not_fuzzed--;
-    if (queue_cur->favored)
-      pending_favored--;
-  }
+if (!stop_soon && !queue_cur->cal_failed && !queue_cur->was_fuzzed)
+{
+  queue_cur->was_fuzzed = 1;
+  pending_not_fuzzed--;
+  if (queue_cur->favored)
+    pending_favored--;
+}
 
-  munmap(orig_in, queue_cur->len);
+munmap(orig_in, queue_cur->len);
 
-  if (in_buf != orig_in)
-    ck_free(in_buf);
-  ck_free(out_buf);
-  ck_free(eff_map);
+if (in_buf != orig_in)
+  ck_free(in_buf);
+ck_free(out_buf);
+ck_free(eff_map);
 
-  return ret_val;
+return ret_val;
 
 #undef FLIP_BIT
 }
