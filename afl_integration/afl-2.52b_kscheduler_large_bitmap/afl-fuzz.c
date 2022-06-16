@@ -7300,7 +7300,7 @@ havoc_stage:
         }
         }
       }
-      else if ()
+      else
       {
         switch (15 + UR((extras_cnt + a_extras_cnt) ? 2 : 0))
         {
